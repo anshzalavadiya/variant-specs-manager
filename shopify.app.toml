@@ -2,7 +2,7 @@
 
 client_id = "c4492db037498bca472719313a73a5c9"
 name = "Variant Specs Manager"
-application_url = "https://example.com"
+application_url = "https://variant-specs-manager.onrender.com"
 embedded = true
 
 [access_scopes]
@@ -45,7 +45,10 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [
+  "https://variant-specs-manager.onrender.com/auth/callback",
+  "https://variant-specs-manager.onrender.com/auth"
+]
 
 [build]
 automatically_update_urls_on_dev = true
