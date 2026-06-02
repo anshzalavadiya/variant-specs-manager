@@ -1,0 +1,274 @@
+<div class="variant-specs-wrapper">
+  <div class="variant-specs-grid" data-variant-specs-body></div>
+</div>
+
+<script>
+  window.variantSpecsData = {
+    {% for variant in product.variants %}
+      "{{ variant.id }}": {{ variant.metafields.custom.variant_specs_json.value | json }}{% unless forloop.last %},{% endunless %}
+    {% endfor %}
+  };
+
+  const categories = [
+    "ITEM DETAILS",
+    "DIAMOND DETAILS",
+    "SIDE DIAMOND DETAILS (IF APPLICABLE)"
+  ];
+
+  function renderVariantSpecs() {
+    const variantInput = document.querySelector('form[action*="/cart/add"] [name="id"]');
+    const variantId = variantInput ? variantInput.value : "{{ product.selected_or_first_available_variant.id }}";
+    const specs = window.variantSpecsData[variantId] || [];
+    const wrapper = document.querySelector("[data-variant-specs-body]");
+
+    if (!wrapper) return;
+
+    wrapper.innerHTML = "";
+
+    categories.forEach(function(category) {
+      const categorySpecs = specs.filter(function(spec) {
+        const specCategory = spec.category || "DIAMOND DETAILS";
+        return specCategory === category && spec.label && spec.value;
+      });
+
+      if (categorySpecs.length === 0) return;
+
+      let html = `
+        <div class="variant-specs-column">
+          <h3>${category}</h3>
+          <table>
+            <tbody>
+      `;
+
+      categorySpecs.forEach(function(spec) {
+        html += `
+          <tr>
+            <th>${spec.label}</th>
+            <td>${spec.value}</td>
+          </tr>
+        `;
+      });
+
+      html += `
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      wrapper.innerHTML += html;
+    });
+  }
+
+  document.addEventListener("change", function() {
+    setTimeout(renderVariantSpecs, 300);
+  });
+
+  document.addEventListener("DOMContentLoaded", renderVariantSpecs);
+  setTimeout(renderVariantSpecs, 500);
+</script>
+
+<style>
+  .variant-specs-wrapper {
+    width: 100%;
+    margin-top: {{ block.settings.section_margin_top }}px;
+    margin-bottom: {{ block.settings.section_margin_bottom }}px;
+  }
+
+  .variant-specs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: {{ block.settings.column_gap }}px;
+  }
+
+  .variant-specs-column h3 {
+    margin: 0 0 18px;
+    font-size: {{ block.settings.heading_size }}px;
+    letter-spacing: {{ block.settings.heading_letter_spacing }}px;
+    text-transform: uppercase;
+    color: {{ block.settings.heading_color }};
+  }
+
+  .variant-specs-column table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  {% if block.settings.border_style == 'bottom' %}
+    .variant-specs-column tr {
+      border-bottom: 1px solid {{ block.settings.border_color }};
+    }
+  {% elsif block.settings.border_style == 'top_bottom' %}
+    .variant-specs-column tr {
+      border-top: 1px solid {{ block.settings.border_color }};
+      border-bottom: 1px solid {{ block.settings.border_color }};
+    }
+  {% elsif block.settings.border_style == 'full' %}
+    .variant-specs-column th,
+    .variant-specs-column td {
+      border: 1px solid {{ block.settings.border_color }};
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+  {% endif %}
+
+  .variant-specs-column th,
+  .variant-specs-column td {
+    padding-top: {{ block.settings.row_padding }}px;
+    padding-bottom: {{ block.settings.row_padding }}px;
+    text-align: left;
+    font-size: {{ block.settings.text_size }}px;
+    color: {{ block.settings.text_color }};
+    vertical-align: top;
+  }
+
+  .variant-specs-column th {
+    width: {{ block.settings.label_width }}%;
+    font-weight: 600;
+  }
+
+  .variant-specs-column td {
+    opacity: 0.75;
+  }
+
+  @media screen and (max-width: 989px) {
+    .variant-specs-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 28px;
+    }
+  }
+
+  @media screen and (max-width: 749px) {
+    .variant-specs-grid {
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .variant-specs-column th,
+    .variant-specs-column td {
+      font-size: 12px;
+    }
+  }
+</style>
+
+{% schema %}
+{
+  "name": "Variant Specs Table",
+  "target": "section",
+  "settings": [
+    {
+      "type": "color",
+      "id": "heading_color",
+      "label": "Heading color",
+      "default": "#000000"
+    },
+    {
+      "type": "color",
+      "id": "text_color",
+      "label": "Text color",
+      "default": "#222222"
+    },
+    {
+      "type": "color",
+      "id": "border_color",
+      "label": "Border color",
+      "default": "#e5e5e5"
+    },
+    {
+      "type": "select",
+      "id": "border_style",
+      "label": "Border style",
+      "default": "bottom",
+      "options": [
+        {
+          "value": "none",
+          "label": "No border"
+        },
+        {
+          "value": "bottom",
+          "label": "Bottom border only"
+        },
+        {
+          "value": "top_bottom",
+          "label": "Top and bottom border"
+        },
+        {
+          "value": "full",
+          "label": "Full table border"
+        }
+      ]
+    },
+    {
+      "type": "range",
+      "id": "heading_size",
+      "label": "Heading font size",
+      "min": 8,
+      "max": 24,
+      "step": 1,
+      "default": 12
+    },
+    {
+      "type": "range",
+      "id": "text_size",
+      "label": "Text font size",
+      "min": 10,
+      "max": 22,
+      "step": 1,
+      "default": 13
+    },
+    {
+      "type": "range",
+      "id": "heading_letter_spacing",
+      "label": "Heading letter spacing",
+      "min": 0,
+      "max": 5,
+      "step": 0.5,
+      "default": 1.5
+    },
+    {
+      "type": "range",
+      "id": "row_padding",
+      "label": "Row padding",
+      "min": 4,
+      "max": 30,
+      "step": 1,
+      "default": 13
+    },
+    {
+      "type": "range",
+      "id": "column_gap",
+      "label": "Column gap",
+      "min": 10,
+      "max": 80,
+      "step": 2,
+      "default": 42
+    },
+    {
+      "type": "range",
+      "id": "label_width",
+      "label": "Label column width",
+      "min": 30,
+      "max": 70,
+      "step": 1,
+      "default": 45
+    },
+    {
+      "type": "range",
+      "id": "section_margin_top",
+      "label": "Top spacing",
+      "min": 0,
+      "max": 100,
+      "step": 4,
+      "default": 40
+    },
+    {
+      "type": "range",
+      "id": "section_margin_bottom",
+      "label": "Bottom spacing",
+      "min": 0,
+      "max": 100,
+      "step": 4,
+      "default": 40
+    }
+  ]
+}
+{% endschema %}
