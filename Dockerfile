@@ -1,4 +1,5 @@
 FROM node:20-alpine
+
 RUN apk add --no-cache openssl
 
 EXPOSE 3000
@@ -13,6 +14,6 @@ RUN npm ci && npm cache clean --force
 
 COPY . .
 
-RUN npm run build
+RUN npm run build -- --skip-dependencies-installation
 
 CMD ["npm", "run", "docker-start"]
