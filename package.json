@@ -24,7 +24,7 @@
     "node": ">=20.19 <22 || >=22.12"
   },
   "dependencies": {
-    "@google/genai": "^2.7.0",
+    "@google/genai": "^2.8.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^6.15.0",
     "@react-router/dev": "^7.16.0",
