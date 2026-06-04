@@ -14,6 +14,6 @@ RUN npm ci && npm cache clean --force
 
 COPY . .
 
-RUN npm run build -- --skip-dependencies-installation
+RUN npm run build
 
 CMD ["npm", "run", "docker-start"]
