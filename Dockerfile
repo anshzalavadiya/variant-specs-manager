@@ -12,7 +12,9 @@ ENV ROLLUP_SKIP_NODEJS_NATIVE=1
 
 COPY package.json package-lock.json* ./
 
-RUN npm ci && npm cache clean --force
+RUN npm ci
+RUN npm install @rollup/rollup-linux-x64-gnu --save-optional
+RUN npm cache clean --force
 
 COPY . .
 
