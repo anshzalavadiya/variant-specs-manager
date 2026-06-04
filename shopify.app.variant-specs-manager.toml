@@ -1,0 +1,22 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "718563e93dccdce73e70c15098090761"
+name = "Variant Specs Manager"
+application_url = "https://variant-specs-manager.onrender.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-07"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products,write_products"
+
+[auth]
+redirect_urls = [
+  "https://variant-specs-manager.onrender.com/auth/callback",
+  "https://variant-specs-manager.onrender.com/auth"
+]
