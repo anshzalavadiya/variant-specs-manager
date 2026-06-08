@@ -11,37 +11,127 @@ import {
   Select,
   Text,
   Box,
+  Divider,
+  Badge,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 
 const METAFIELD_NAMESPACE = "custom";
 const METAFIELD_KEY = "variant_specs_json";
 
-const DEFAULT_SPECS = [
-  { category: "ITEM DETAILS", label: "SKU", value: "" },
-  { category: "ITEM DETAILS", label: "Gender", value: "" },
-  { category: "ITEM DETAILS", label: "Style", value: "" },
-  { category: "DIAMOND DETAILS", label: "Diamond Type", value: "" },
-  { category: "DIAMOND DETAILS", label: "Color", value: "" },
-  { category: "DIAMOND DETAILS", label: "Clarity", value: "" },
-  { category: "DIAMOND DETAILS", label: "Carat", value: "" },
-  { category: "DIAMOND DETAILS", label: "Certification", value: "" },
-  { category: "DIAMOND DETAILS", label: "Shape", value: "" },
-  { category: "SIDE DIAMOND DETAILS (IF APPLICABLE)", label: "Stone Type", value: "" },
-  { category: "SIDE DIAMOND DETAILS (IF APPLICABLE)", label: "Clarity", value: "" },
-  { category: "SIDE DIAMOND DETAILS (IF APPLICABLE)", label: "Setting", value: "" },
+const SPEC_CATEGORY_OPTIONS = [
+  { label: "Item Details", value: "ITEM DETAILS" },
+  { label: "Diamond Details", value: "DIAMOND DETAILS" },
+  {
+    label: "Side Diamond Details",
+    value: "SIDE DIAMOND DETAILS (IF APPLICABLE)",
+  },
 ];
+
+const POSITION_OPTIONS = [
+  { label: "Bottom of product", value: "bottom" },
+  { label: "Right side of product", value: "right" },
+  { label: "Hidden", value: "hidden" },
+];
+
+const STYLE_OPTIONS = [
+  { label: "Accordion / Collapsible", value: "accordion" },
+  { label: "Always open", value: "open" },
+  { label: "Card design", value: "card" },
+  { label: "Tab item", value: "tab" },
+];
+
+const DEFAULT_DISPLAY = {
+  description: { position: "bottom", style: "open" },
+  benefits: { position: "right", style: "card" },
+  specs: { position: "bottom", style: "accordion" },
+  materials: { position: "bottom", style: "accordion" },
+  technicalDetails: { position: "bottom", style: "accordion" },
+  gallery: { position: "bottom", style: "card" },
+  video: { position: "bottom", style: "card" },
+  certificate: { position: "bottom", style: "card" },
+  shipping: { position: "bottom", style: "accordion" },
+  care: { position: "bottom", style: "accordion" },
+  faqs: { position: "bottom", style: "accordion" },
+};
+
+const DEFAULT_CONTENT = {
+  descriptionHtml: "",
+  benefits: [{ title: "", text: "", icon: "💎", image: "" }],
+  specs: [
+    { category: "ITEM DETAILS", label: "SKU", value: "" },
+    { category: "ITEM DETAILS", label: "Gender", value: "" },
+    { category: "ITEM DETAILS", label: "Style", value: "" },
+    { category: "DIAMOND DETAILS", label: "Diamond Type", value: "" },
+    { category: "DIAMOND DETAILS", label: "Color", value: "" },
+    { category: "DIAMOND DETAILS", label: "Clarity", value: "" },
+    { category: "DIAMOND DETAILS", label: "Carat", value: "" },
+    { category: "DIAMOND DETAILS", label: "Certification", value: "" },
+    { category: "DIAMOND DETAILS", label: "Shape", value: "" },
+    {
+      category: "SIDE DIAMOND DETAILS (IF APPLICABLE)",
+      label: "Stone Type",
+      value: "",
+    },
+    {
+      category: "SIDE DIAMOND DETAILS (IF APPLICABLE)",
+      label: "Clarity",
+      value: "",
+    },
+    {
+      category: "SIDE DIAMOND DETAILS (IF APPLICABLE)",
+      label: "Setting",
+      value: "",
+    },
+  ],
+  materials: [{ label: "", value: "" }],
+  technicalDetails: [{ label: "", value: "" }],
+  gallery: [],
+  videoUrl: "",
+  pdfUrl: "",
+  shippingInfoHtml: "",
+  careInstructionsHtml: "",
+  faqs: [{ question: "", answerHtml: "" }],
+  display: DEFAULT_DISPLAY,
+};
+
+const normalizeContent = (data) => {
+  if (Array.isArray(data)) {
+    return { ...DEFAULT_CONTENT, specs: data };
+  }
+
+  return {
+    ...DEFAULT_CONTENT,
+    ...data,
+    benefits: Array.isArray(data?.benefits)
+      ? data.benefits
+      : DEFAULT_CONTENT.benefits,
+    specs: Array.isArray(data?.specs) ? data.specs : DEFAULT_CONTENT.specs,
+    materials: Array.isArray(data?.materials)
+      ? data.materials
+      : DEFAULT_CONTENT.materials,
+    technicalDetails: Array.isArray(data?.technicalDetails)
+      ? data.technicalDetails
+      : DEFAULT_CONTENT.technicalDetails,
+    gallery: Array.isArray(data?.gallery) ? data.gallery : [],
+    faqs: Array.isArray(data?.faqs) ? data.faqs : DEFAULT_CONTENT.faqs,
+    display: {
+      ...DEFAULT_DISPLAY,
+      ...(data?.display || {}),
+    },
+  };
+};
 
 export const loader = async ({ request }) => {
   const { admin } = await authenticate.admin(request);
 
   const response = await admin.graphql(`
     query {
-      products(first: 20) {
+      products(first: 30) {
         nodes {
           id
           title
-          variants(first: 50) {
+          variants(first: 100) {
             nodes {
               id
               title
@@ -59,7 +149,7 @@ export const loader = async ({ request }) => {
   const data = await response.json();
 
   return {
-    products: data.data.products.nodes,
+    products: data?.data?.products?.nodes || [],
   };
 };
 
@@ -67,65 +157,16 @@ export const action = async ({ request }) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
 
-  const actionType = formData.get("actionType");
-
-  if (actionType === "bulkSave") {
-    const payload = JSON.parse(formData.get("payload") || "[]");
-
-    const metafields = payload.map((item) => ({
-      ownerId: item.variantId,
-      namespace: METAFIELD_NAMESPACE,
-      key: METAFIELD_KEY,
-      type: "json",
-      value: JSON.stringify(item.specs),
-    }));
-
-    const allErrors = [];
-
-    for (let i = 0; i < metafields.length; i += 25) {
-      const chunk = metafields.slice(i, i + 25);
-
-      const response = await admin.graphql(
-        `
-          mutation SaveVariantSpecs($metafields: [MetafieldsSetInput!]!) {
-            metafieldsSet(metafields: $metafields) {
-              metafields {
-                id
-                key
-                value
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `,
-        {
-          variables: {
-            metafields: chunk,
-          },
-        }
-      );
-
-      const data = await response.json();
-      allErrors.push(...data.data.metafieldsSet.userErrors);
-    }
-
-    return {
-      success: allErrors.length === 0,
-      errors: allErrors,
-      bulkSaved: true,
-      count: payload.length,
-    };
-  }
-
   const variantId = formData.get("variantId");
-  const specs = formData.get("specs");
+  const content = formData.get("content");
+
+  if (!variantId) {
+    return { success: false, errors: [{ message: "No variant selected." }] };
+  }
 
   const response = await admin.graphql(
     `
-      mutation SaveVariantSpecs($metafields: [MetafieldsSetInput!]!) {
+      mutation SaveVariantContent($metafields: [MetafieldsSetInput!]!) {
         metafieldsSet(metafields: $metafields) {
           metafields {
             id
@@ -147,599 +188,806 @@ export const action = async ({ request }) => {
             namespace: METAFIELD_NAMESPACE,
             key: METAFIELD_KEY,
             type: "json",
-            value: specs,
+            value: content || "{}",
           },
         ],
       },
-    }
+    },
   );
 
   const data = await response.json();
+  const errors = data?.data?.metafieldsSet?.userErrors || [];
 
   return {
-    success: data.data.metafieldsSet.userErrors.length === 0,
-    errors: data.data.metafieldsSet.userErrors,
+    success: errors.length === 0,
+    errors,
   };
 };
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function RichTextEditor({ label, value, onChange }) {
+  const editorRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value || "";
+    }
+  }, [value]);
+
+  const runCommand = (command, commandValue = null) => {
+    document.execCommand(command, false, commandValue);
+    onChange(editorRef.current?.innerHTML || "");
+  };
+
+  const addLink = () => {
+    const url = window.prompt("Enter link URL");
+    if (url) runCommand("createLink", url);
+  };
+
+  const uploadImage = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const dataUrl = await fileToDataUrl(file);
+    runCommand("insertImage", dataUrl);
+    event.target.value = "";
+  };
+
+  const handlePaste = async (event) => {
+    const items = event.clipboardData?.items || [];
+
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        event.preventDefault();
+        const file = item.getAsFile();
+        const dataUrl = await fileToDataUrl(file);
+        runCommand("insertImage", dataUrl);
+        return;
+      }
+    }
+  };
+
+  return (
+    <BlockStack gap="200">
+      <Text variant="headingSm">{label}</Text>
+
+      <InlineStack gap="200">
+        <Button onClick={() => runCommand("bold")}>Bold</Button>
+        <Button onClick={() => runCommand("italic")}>Italic</Button>
+        <Button onClick={() => runCommand("underline")}>Underline</Button>
+        <Button onClick={() => runCommand("insertUnorderedList")}>Bullets</Button>
+        <Button onClick={() => runCommand("insertOrderedList")}>Number List</Button>
+        <Button onClick={addLink}>Link</Button>
+
+        <label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={uploadImage}
+            style={{ display: "none" }}
+          />
+          <span
+            style={{
+              display: "inline-flex",
+              padding: "7px 12px",
+              border: "1px solid #c9cccf",
+              borderRadius: "8px",
+              cursor: "pointer",
+              background: "#fff",
+            }}
+          >
+            Upload Image
+          </span>
+        </label>
+      </InlineStack>
+
+      <div
+        ref={editorRef}
+        contentEditable
+        onInput={() => onChange(editorRef.current?.innerHTML || "")}
+        onPaste={handlePaste}
+        style={{
+          minHeight: "160px",
+          padding: "14px",
+          border: "1px solid #c9cccf",
+          borderRadius: "10px",
+          background: "#fff",
+          lineHeight: "1.7",
+        }}
+      />
+    </BlockStack>
+  );
+}
 
 export default function AppIndex() {
   const { products } = useLoaderData();
   const fetcher = useFetcher();
-
-  const fileInputRef = React.useRef(null);
-  const excelInputRef = React.useRef(null);
 
   const productOptions = products.map((product) => ({
     label: product.title,
     value: product.id,
   }));
 
-  const firstProduct = products[0];
-
   const [selectedProductId, setSelectedProductId] = React.useState(
-    firstProduct?.id || ""
+    products[0]?.id || "",
   );
 
   const selectedProduct = products.find(
-    (product) => product.id === selectedProductId
+    (product) => product.id === selectedProductId,
   );
 
   const variantOptions =
-    selectedProduct?.variants.nodes.map((variant) => ({
+    selectedProduct?.variants?.nodes?.map((variant) => ({
       label: variant.title,
       value: variant.id,
     })) || [];
 
   const [selectedVariantId, setSelectedVariantId] = React.useState(
-    variantOptions[0]?.value || ""
+    variantOptions[0]?.value || "",
   );
 
-  const selectedVariant = selectedProduct?.variants.nodes.find(
-    (variant) => variant.id === selectedVariantId
+  const selectedVariant = selectedProduct?.variants?.nodes?.find(
+    (variant) => variant.id === selectedVariantId,
   );
 
-  const parseSpecs = (variant) => {
+  const parseContent = React.useCallback((variant) => {
     try {
-      return variant?.metafield?.value
-        ? JSON.parse(variant.metafield.value)
-        : DEFAULT_SPECS.map((item) => ({ ...item }));
+      const raw = variant?.metafield?.value;
+      return raw ? normalizeContent(JSON.parse(raw)) : structuredClone(DEFAULT_CONTENT);
     } catch {
-      return DEFAULT_SPECS.map((item) => ({ ...item }));
+      return structuredClone(DEFAULT_CONTENT);
     }
-  };
+  }, []);
 
-  const getSpecs = () => parseSpecs(selectedVariant);
+  const [content, setContent] = React.useState(() => parseContent(selectedVariant));
 
-  const [specs, setSpecs] = React.useState(getSpecs());
-  const [aiPrompt, setAiPrompt] = React.useState("");
-  const [aiLoading, setAiLoading] = React.useState(false);
-  const [imageLoading, setImageLoading] = React.useState(false);
-  const [aiError, setAiError] = React.useState("");
-  const [selectedImage, setSelectedImage] = React.useState(null);
-  const [imagePreview, setImagePreview] = React.useState("");
-  const [excelMessage, setExcelMessage] = React.useState("");
+  const [adminOpenSections, setAdminOpenSections] = React.useState({
+    description: true,
+    benefits: false,
+    specs: true,
+    materials: false,
+    technicalDetails: false,
+    gallery: false,
+    video: false,
+    shipping: false,
+    care: false,
+    faqs: false,
+  });
 
   React.useEffect(() => {
-    setSelectedVariantId(selectedProduct?.variants.nodes[0]?.id || "");
-  }, [selectedProductId]);
+    setSelectedVariantId(selectedProduct?.variants?.nodes?.[0]?.id || "");
+  }, [selectedProductId, selectedProduct]);
 
   React.useEffect(() => {
-    setSpecs(getSpecs());
-  }, [selectedVariantId]);
+    setContent(parseContent(selectedVariant));
+  }, [selectedVariantId, selectedVariant, parseContent]);
 
-  const safeJsonFetch = async (url, options) => {
-    const response = await fetch(url, options);
-    const text = await response.text();
-
-    let data;
-
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(
-        "API route returned HTML instead of JSON. Check api route file name and restart app."
-      );
-    }
-
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || "Something went wrong");
-    }
-
-    return data;
+  const updateContent = (key, value) => {
+    setContent((prev) => ({ ...prev, [key]: value }));
   };
 
-  const fileToBase64 = (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+  const updateDisplay = (key, field, value) => {
+    setContent((prev) => ({
+      ...prev,
+      display: {
+        ...prev.display,
+        [key]: {
+          ...(prev.display?.[key] || DEFAULT_DISPLAY[key]),
+          [field]: value,
+        },
+      },
+    }));
+  };
 
-      reader.onload = () => {
-        const result = reader.result;
-        resolve(result.split(",")[1]);
-      };
-
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+  const updateArrayItem = (key, index, field, value) => {
+    setContent((prev) => {
+      const updated = [...prev[key]];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, [key]: updated };
     });
   };
 
-  const setImageFile = (file) => {
+  const addArrayItem = (key, item) => {
+    setContent((prev) => ({ ...prev, [key]: [...prev[key], item] }));
+  };
+
+  const removeArrayItem = (key, index) => {
+    setContent((prev) => ({
+      ...prev,
+      [key]: prev[key].filter((_, i) => i !== index),
+    }));
+  };
+
+  const addGalleryImage = async (event) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
-    setSelectedImage(file);
-    setImagePreview(URL.createObjectURL(file));
-    setAiError("");
-  };
-
-  const generateWithTextAI = async () => {
-    setAiLoading(true);
-    setAiError("");
-
-    try {
-      const data = await safeJsonFetch("/api/ai-generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          productTitle: selectedProduct?.title || "",
-          variantTitle: selectedVariant?.title || "",
-          userPrompt: aiPrompt,
-          currentSpecs: specs,
-        }),
-      });
-
-      setSpecs(data.specs);
-    } catch (error) {
-      setAiError(error.message || "AI generation failed");
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  const analyzeSelectedImageWithAI = async () => {
-    if (!selectedImage) {
-      setAiError("No image selected. Upload or paste image first.");
-      return;
-    }
-
-    setImageLoading(true);
-    setAiError("");
-
-    try {
-      const base64Image = await fileToBase64(selectedImage);
-
-      const data = await safeJsonFetch("/api/ai-analyze-image", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          imageBase64: base64Image,
-          mimeType: selectedImage.type || "image/jpeg",
-          productTitle: selectedProduct?.title || "",
-          variantTitle: selectedVariant?.title || "",
-          userPrompt: aiPrompt || "",
-          currentSpecs: specs,
-        }),
-      });
-
-      setSpecs(data.specs);
-    } catch (error) {
-      setAiError(error.message || "Image analysis failed");
-    } finally {
-      setImageLoading(false);
-    }
-  };
-
-  const handleFileSelect = (event) => {
-    const file = event.target.files?.[0];
-    setImageFile(file);
+    const dataUrl = await fileToDataUrl(file);
+    updateContent("gallery", [...content.gallery, dataUrl]);
     event.target.value = "";
   };
 
-  const handlePasteImage = (event) => {
-    const items = event.clipboardData?.items || [];
-    let foundImage = false;
-
-    for (const item of items) {
-      if (item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        setImageFile(file);
-        foundImage = true;
-        break;
-      }
-    }
-
-    if (!foundImage) {
-      setAiError("No image found in clipboard. Copy image first, then paste here.");
-    }
-  };
-
-  const clearImage = () => {
-    setSelectedImage(null);
-    setImagePreview("");
-  };
-
-  const updateSpec = (index, field, value) => {
-    const updated = [...specs];
-    updated[index][field] = value;
-    setSpecs(updated);
-  };
-
-  const addField = () => {
-    setSpecs([
-      ...specs,
-      {
-        category: "DIAMOND DETAILS",
-        label: "",
-        value: "",
-      },
-    ]);
-  };
-
-  const removeField = (index) => {
-    setSpecs(specs.filter((_, i) => i !== index));
-  };
-
-  const saveSpecs = () => {
-    const currentKey = `${selectedProduct?.title}|||${selectedVariant?.title}`.toLowerCase();
-const currentVariantData = variantMap.get(currentKey);
-
-if (currentVariantData) {
-  setSpecs(currentVariantData.specs);
-}
+  const saveContent = () => {
     fetcher.submit(
       {
         variantId: selectedVariantId,
-        specs: JSON.stringify(specs),
+        content: JSON.stringify(content),
       },
-      { method: "POST" }
+      { method: "POST" },
     );
   };
 
-  const downloadExcelFormat = async () => {
-    const XLSX = await import("xlsx");
-
-    const rows = [];
-
-    products.forEach((product) => {
-      product.variants.nodes.forEach((variant) => {
-        const variantSpecs = parseSpecs(variant);
-
-        variantSpecs.forEach((spec) => {
-          rows.push({
-            "Product Name": product.title,
-            "Product Variant Name": variant.title,
-            Category: spec.category,
-            "Field Name": spec.label,
-            Value: spec.value || "",
-          });
-        });
-      });
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Variant Specs");
-    XLSX.writeFile(workbook, "variant-specs-format.xlsx");
-  };
-
-  const downloadCurrentVariantExcel = async () => {
-    const XLSX = await import("xlsx");
-
-    const rows = specs.map((spec) => ({
-      "Product Name": selectedProduct?.title || "",
-      "Product Variant Name": selectedVariant?.title || "",
-      Category: spec.category,
-      "Field Name": spec.label,
-      Value: spec.value || "",
+  const toggleAdminSection = (key) => {
+    setAdminOpenSections((prev) => ({
+      ...prev,
+      [key]: !prev[key],
     }));
-
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Current Variant");
-    XLSX.writeFile(workbook, "current-variant-specs.xlsx");
   };
 
-  const handleExcelUpload = async (event) => {
-    const file = event.target.files?.[0];
+  const Section = ({ title, sectionKey, children }) => (
+    <Card>
+      <BlockStack gap="400">
+        <InlineStack align="space-between" blockAlign="center">
+          <InlineStack gap="300" blockAlign="center">
+            <Button variant="plain" onClick={() => toggleAdminSection(sectionKey)}>
+              {adminOpenSections[sectionKey] ? "▼" : "▶"}
+            </Button>
 
-    if (!file) return;
+            <Text variant="headingLg">{title}</Text>
+          </InlineStack>
 
-    setExcelMessage("");
+          <InlineStack gap="300">
+            <div style={{ width: 210 }}>
+              <Select
+                label="Position"
+                options={POSITION_OPTIONS}
+                value={content.display?.[sectionKey]?.position || "bottom"}
+                onChange={(value) => updateDisplay(sectionKey, "position", value)}
+              />
+            </div>
 
-    try {
-      const XLSX = await import("xlsx");
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet);
+            <div style={{ width: 210 }}>
+              <Select
+                label="Display style"
+                options={STYLE_OPTIONS}
+                value={content.display?.[sectionKey]?.style || "accordion"}
+                onChange={(value) => updateDisplay(sectionKey, "style", value)}
+              />
+            </div>
+          </InlineStack>
+        </InlineStack>
 
-      const variantMap = new Map();
+        {adminOpenSections[sectionKey] && (
+          <>
+            <Divider />
+            {children}
+          </>
+        )}
+      </BlockStack>
+    </Card>
+  );
 
-      products.forEach((product) => {
-        product.variants.nodes.forEach((variant) => {
-          const key = `${product.title}|||${variant.title}`.toLowerCase();
-          variantMap.set(key, {
-            product,
-            variant,
-            specs: parseSpecs(variant).map((spec) => ({ ...spec })),
-          });
-        });
-      });
-
-      let matchedRows = 0;
-      let addedFields = 0;
-      let updatedFields = 0;
-
-      rows.forEach((row) => {
-        const productName = String(row["Product Name"] || "").trim();
-        const variantName = String(row["Product Variant Name"] || "").trim();
-        const category = String(row["Category"] || "").trim();
-        const fieldName = String(row["Field Name"] || "").trim();
-        const value = String(row["Value"] || "").trim();
-
-        if (!productName || !variantName || !category || !fieldName) return;
-
-        const key = `${productName}|||${variantName}`.toLowerCase();
-        const found = variantMap.get(key);
-
-        if (!found) return;
-
-        matchedRows++;
-
-        const existingIndex = found.specs.findIndex(
-          (spec) =>
-            String(spec.category).toLowerCase() === category.toLowerCase() &&
-            String(spec.label).toLowerCase() === fieldName.toLowerCase()
-        );
-
-        if (existingIndex >= 0) {
-          found.specs[existingIndex].value = value;
-          updatedFields++;
-        } else {
-          found.specs.push({
-            category,
-            label: fieldName,
-            value,
-          });
-          addedFields++;
-        }
-      });
-
-      const payload = [];
-
-      variantMap.forEach((item) => {
-        payload.push({
-          variantId: item.variant.id,
-          specs: item.specs,
-        });
-      });
-
-      fetcher.submit(
-        {
-          actionType: "bulkSave",
-          payload: JSON.stringify(payload),
-        },
-        { method: "POST" }
-      );
-
-      setExcelMessage(
-        `Excel processed ✅ Matched rows: ${matchedRows}, Updated: ${updatedFields}, Added: ${addedFields}`
-      );
-    } catch (error) {
-      setExcelMessage(error.message || "Excel upload failed");
-    } finally {
-      event.target.value = "";
-    }
-  };
+  const groupedSpecs = content.specs.reduce((acc, spec, index) => {
+    const category = spec.category || "ITEM DETAILS";
+    if (!acc[category]) acc[category] = [];
+    acc[category].push({ ...spec, originalIndex: index });
+    return acc;
+  }, {});
 
   return (
-    <Page title="Variant Specs Manager">
-      <Layout>
-        <Layout.Section>
-          <Card>
+    <div style={{ background: "#F8FAFC", paddingBottom: 32 }}>
+      <Page title="Variant Content Manager">
+        <Layout>
+          <Layout.Section>
             <BlockStack gap="500">
-              <Select
-                label="Select Product"
-                options={productOptions}
-                value={selectedProductId}
-                onChange={setSelectedProductId}
-              />
+              <div
+                style={{
+                  background: "linear-gradient(135deg,#1D4ED8,#2563EB,#60A5FA)",
+                  borderRadius: 22,
+                  padding: 34,
+                  color: "#fff",
+                }}
+              >
+                <InlineStack align="space-between" blockAlign="center">
+                  <BlockStack gap="200">
+                    <h1 style={{ fontSize: 34, margin: 0 }}>
+                      Variant Content Manager
+                    </h1>
+                    <Text as="p">
+                      Control every variant section with position and display style.
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </div>
 
-              <Select
-                label="Select Variant"
-                options={variantOptions}
-                value={selectedVariantId}
-                onChange={setSelectedVariantId}
-              />
+              <Card>
+                <BlockStack gap="400">
+                  <Text variant="headingLg">Product workspace</Text>
 
-              <Text variant="headingMd">AI Auto Fill</Text>
-
-              <TextField
-                label="Tell AI what data to add"
-                value={aiPrompt}
-                onChange={setAiPrompt}
-                multiline={4}
-                placeholder="Example: 18K rose gold ring, lab diamond, oval shape, 1.5 carat."
-              />
-
-              <Box padding="400" background="bg-surface-secondary">
-                <div
-                  onPaste={handlePasteImage}
-                  tabIndex={0}
-                  style={{
-                    border: "2px dashed #999",
-                    borderRadius: "10px",
-                    padding: "20px",
-                    textAlign: "center",
-                    cursor: "pointer",
-                    background: "#fff",
-                  }}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileSelect}
-                    style={{ display: "none" }}
-                  />
-
-                  <Text variant="bodyMd">
-                    Click here to upload image or paste copied image here
-                  </Text>
-
-                  <Text tone="subdued">
-                    Image preview will show below.
-                  </Text>
-                </div>
-              </Box>
-
-              {selectedImage && (
-                <BlockStack gap="200">
-                  <Text tone="success">
-                    Image selected ✅ {selectedImage.name || "Pasted image"}
-                  </Text>
-
-                  {imagePreview && (
-                    <img
-                      src={imagePreview}
-                      alt="Selected jewellery"
-                      style={{
-                        width: "160px",
-                        height: "160px",
-                        objectFit: "cover",
-                        borderRadius: "10px",
-                        border: "1px solid #ddd",
-                      }}
-                    />
-                  )}
-
-                  <InlineStack gap="300">
-                    <Button
-                      loading={imageLoading}
-                      onClick={analyzeSelectedImageWithAI}
-                    >
-                      Analyze Image AI
-                    </Button>
-
-                    <Button onClick={clearImage}>Remove Image</Button>
-                  </InlineStack>
-                </BlockStack>
-              )}
-
-              <InlineStack gap="300">
-                <Button loading={aiLoading} onClick={generateWithTextAI}>
-                  Generate With Text AI
-                </Button>
-              </InlineStack>
-
-              {aiError && <Text tone="critical">{aiError}</Text>}
-
-              <Text variant="headingMd">Excel Upload / Download</Text>
-
-              <Text tone="subdued">
-                Excel columns: Product Name, Product Variant Name, Category,
-                Field Name, Value
-              </Text>
-
-              <InlineStack gap="300">
-                <Button onClick={downloadExcelFormat}>
-                  Download Full Excel Format
-                </Button>
-
-                <Button onClick={downloadCurrentVariantExcel}>
-                  Download Current Variant Excel
-                </Button>
-
-                <input
-                  ref={excelInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleExcelUpload}
-                  style={{ display: "none" }}
-                />
-
-                <Button onClick={() => excelInputRef.current?.click()}>
-                  Upload Excel & Save Data
-                </Button>
-              </InlineStack>
-
-              {excelMessage && <Text tone="success">{excelMessage}</Text>}
-
-              <Text variant="headingMd">Variant Specification Fields</Text>
-
-              {specs.map((spec, index) => (
-                <InlineStack gap="300" key={index} align="center">
-                  <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+                      gap: 16,
+                    }}
+                  >
                     <Select
-                      label="Category"
-                      options={[
-                        { label: "Item Details", value: "ITEM DETAILS" },
-                        { label: "Diamond Details", value: "DIAMOND DETAILS" },
-                        {
-                          label: "Side Diamond Details",
-                          value: "SIDE DIAMOND DETAILS (IF APPLICABLE)",
-                        },
-                      ]}
-                      value={spec.category || "DIAMOND DETAILS"}
-                      onChange={(value) =>
-                        updateSpec(index, "category", value)
-                      }
+                      label="Select Product"
+                      options={productOptions}
+                      value={selectedProductId}
+                      onChange={setSelectedProductId}
                     />
 
-                    <TextField
-                      label="Field Name"
-                      value={spec.label}
-                      onChange={(value) => updateSpec(index, "label", value)}
+                    <Select
+                      label="Select Variant"
+                      options={variantOptions}
+                      value={selectedVariantId}
+                      onChange={setSelectedVariantId}
                     />
                   </div>
+                </BlockStack>
+              </Card>
 
-                  <div style={{ flex: 1 }}>
-                    <TextField
-                      label="Value"
-                      value={spec.value}
-                      onChange={(value) => updateSpec(index, "value", value)}
+              <Section title="Rich Variant Description" sectionKey="description">
+                <RichTextEditor
+                  label="Description"
+                  value={content.descriptionHtml}
+                  onChange={(value) => updateContent("descriptionHtml", value)}
+                />
+              </Section>
+
+              <Section title="Benefits" sectionKey="benefits">
+                <BlockStack gap="300">
+                  {content.benefits.map((benefit, index) => (
+                    <Card key={index}>
+                      <BlockStack gap="300">
+                        <InlineStack gap="300">
+                          <div style={{ flex: 0.3 }}>
+                            <TextField
+                              label="Icon"
+                              value={benefit.icon}
+                              onChange={(value) =>
+                                updateArrayItem("benefits", index, "icon", value)
+                              }
+                            />
+                          </div>
+
+                          <div style={{ flex: 1 }}>
+                            <TextField
+                              label="Title"
+                              value={benefit.title}
+                              onChange={(value) =>
+                                updateArrayItem("benefits", index, "title", value)
+                              }
+                            />
+                          </div>
+                        </InlineStack>
+
+                        <TextField
+                          label="Text"
+                          multiline={2}
+                          value={benefit.text}
+                          onChange={(value) =>
+                            updateArrayItem("benefits", index, "text", value)
+                          }
+                        />
+
+                        <TextField
+                          label="Image URL"
+                          value={benefit.image}
+                          onChange={(value) =>
+                            updateArrayItem("benefits", index, "image", value)
+                          }
+                        />
+
+                        {benefit.image && (
+                          <img
+                            src={benefit.image}
+                            alt=""
+                            style={{
+                              width: 100,
+                              height: 100,
+                              objectFit: "cover",
+                              borderRadius: 12,
+                            }}
+                          />
+                        )}
+
+                        <Button
+                          tone="critical"
+                          onClick={() => removeArrayItem("benefits", index)}
+                        >
+                          Remove Benefit
+                        </Button>
+                      </BlockStack>
+                    </Card>
+                  ))}
+
+                  <Button
+                    onClick={() =>
+                      addArrayItem("benefits", {
+                        title: "",
+                        text: "",
+                        icon: "✨",
+                        image: "",
+                      })
+                    }
+                  >
+                    Add Benefit
+                  </Button>
+                </BlockStack>
+              </Section>
+
+              <Section title="Specifications Table" sectionKey="specs">
+                <BlockStack gap="400">
+                  {SPEC_CATEGORY_OPTIONS.map((categoryOption) => {
+                    const categorySpecs = groupedSpecs[categoryOption.value] || [];
+
+                    return (
+                      <Card key={categoryOption.value}>
+                        <BlockStack gap="300">
+                          <InlineStack align="space-between" blockAlign="center">
+                            <BlockStack gap="050">
+                              <Text variant="headingMd">{categoryOption.label}</Text>
+                              <Text tone="subdued">
+                                {categorySpecs.length} fields in this category
+                              </Text>
+                            </BlockStack>
+
+                            <Button
+                              onClick={() =>
+                                addArrayItem("specs", {
+                                  category: categoryOption.value,
+                                  label: "",
+                                  value: "",
+                                })
+                              }
+                            >
+                              Add Field
+                            </Button>
+                          </InlineStack>
+
+                          <Divider />
+
+                          <BlockStack gap="300">
+                            {categorySpecs.map((spec) => (
+                              <Box
+                                key={spec.originalIndex}
+                                padding="300"
+                                background="bg-surface-secondary"
+                                borderRadius="300"
+                              >
+                                <InlineStack gap="300" blockAlign="end" wrap={false}>
+                                  <div style={{ flex: 1 }}>
+                                    <Select
+                                      label="Category"
+                                      options={SPEC_CATEGORY_OPTIONS}
+                                      value={spec.category}
+                                      onChange={(value) =>
+                                        updateArrayItem(
+                                          "specs",
+                                          spec.originalIndex,
+                                          "category",
+                                          value,
+                                        )
+                                      }
+                                    />
+                                  </div>
+
+                                  <div style={{ flex: 1 }}>
+                                    <TextField
+                                      label="Field Name"
+                                      value={spec.label}
+                                      onChange={(value) =>
+                                        updateArrayItem(
+                                          "specs",
+                                          spec.originalIndex,
+                                          "label",
+                                          value,
+                                        )
+                                      }
+                                    />
+                                  </div>
+
+                                  <div style={{ flex: 1 }}>
+                                    <TextField
+                                      label="Value"
+                                      value={spec.value}
+                                      onChange={(value) =>
+                                        updateArrayItem(
+                                          "specs",
+                                          spec.originalIndex,
+                                          "value",
+                                          value,
+                                        )
+                                      }
+                                    />
+                                  </div>
+
+                                  <Button
+                                    tone="critical"
+                                    onClick={() =>
+                                      removeArrayItem("specs", spec.originalIndex)
+                                    }
+                                  >
+                                    Remove
+                                  </Button>
+                                </InlineStack>
+                              </Box>
+                            ))}
+                          </BlockStack>
+                        </BlockStack>
+                      </Card>
+                    );
+                  })}
+                </BlockStack>
+              </Section>
+
+              <Section title="Materials / Ingredients" sectionKey="materials">
+                <BlockStack gap="300">
+                  {content.materials.map((item, index) => (
+                    <InlineStack gap="300" blockAlign="end" key={index}>
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          label="Label"
+                          value={item.label}
+                          onChange={(value) =>
+                            updateArrayItem("materials", index, "label", value)
+                          }
+                        />
+                      </div>
+
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          label="Value"
+                          value={item.value}
+                          onChange={(value) =>
+                            updateArrayItem("materials", index, "value", value)
+                          }
+                        />
+                      </div>
+
+                      <Button
+                        tone="critical"
+                        onClick={() => removeArrayItem("materials", index)}
+                      >
+                        Remove
+                      </Button>
+                    </InlineStack>
+                  ))}
+
+                  <Button
+                    onClick={() =>
+                      addArrayItem("materials", { label: "", value: "" })
+                    }
+                  >
+                    Add Material
+                  </Button>
+                </BlockStack>
+              </Section>
+
+              <Section title="Technical / Nutrition Details" sectionKey="technicalDetails">
+                <BlockStack gap="300">
+                  {content.technicalDetails.map((item, index) => (
+                    <InlineStack gap="300" blockAlign="end" key={index}>
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          label="Label"
+                          value={item.label}
+                          onChange={(value) =>
+                            updateArrayItem("technicalDetails", index, "label", value)
+                          }
+                        />
+                      </div>
+
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          label="Value"
+                          value={item.value}
+                          onChange={(value) =>
+                            updateArrayItem("technicalDetails", index, "value", value)
+                          }
+                        />
+                      </div>
+
+                      <Button
+                        tone="critical"
+                        onClick={() => removeArrayItem("technicalDetails", index)}
+                      >
+                        Remove
+                      </Button>
+                    </InlineStack>
+                  ))}
+
+                  <Button
+                    onClick={() =>
+                      addArrayItem("technicalDetails", { label: "", value: "" })
+                    }
+                  >
+                    Add Row
+                  </Button>
+                </BlockStack>
+              </Section>
+
+              <Section title="Image Gallery" sectionKey="gallery">
+                <BlockStack gap="300">
+                  <label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={addGalleryImage}
+                      style={{ display: "none" }}
                     />
-                  </div>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        padding: "10px 14px",
+                        background: "#2563EB",
+                        color: "#fff",
+                        borderRadius: 10,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Upload Gallery Image
+                    </span>
+                  </label>
 
-                  <Button tone="critical" onClick={() => removeField(index)}>
-                    Remove
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    {content.gallery.map((image, index) => (
+                      <div key={index}>
+                        <img
+                          src={image}
+                          alt=""
+                          style={{
+                            width: 110,
+                            height: 110,
+                            objectFit: "cover",
+                            borderRadius: 12,
+                            border: "1px solid #DBEAFE",
+                          }}
+                        />
+                        <br />
+                        <Button
+                          tone="critical"
+                          onClick={() => removeArrayItem("gallery", index)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </BlockStack>
+              </Section>
+
+              <Section title="Video" sectionKey="video">
+                <TextField
+                  label="Video URL"
+                  value={content.videoUrl}
+                  onChange={(value) => updateContent("videoUrl", value)}
+                />
+              </Section>
+
+              <Section title="PDF / Certificate" sectionKey="certificate">
+                <TextField
+                  label="PDF / Certificate URL"
+                  value={content.pdfUrl}
+                  onChange={(value) => updateContent("pdfUrl", value)}
+                />
+              </Section>
+
+              <Section title="Shipping Information" sectionKey="shipping">
+                <RichTextEditor
+                  label="Shipping Info"
+                  value={content.shippingInfoHtml}
+                  onChange={(value) => updateContent("shippingInfoHtml", value)}
+                />
+              </Section>
+
+              <Section title="Care Instructions" sectionKey="care">
+                <RichTextEditor
+                  label="Care Instructions"
+                  value={content.careInstructionsHtml}
+                  onChange={(value) => updateContent("careInstructionsHtml", value)}
+                />
+              </Section>
+
+              <Section title="FAQ" sectionKey="faqs">
+                <BlockStack gap="300">
+                  {content.faqs.map((faq, index) => (
+                    <Card key={index}>
+                      <BlockStack gap="300">
+                        <TextField
+                          label="Question"
+                          value={faq.question}
+                          onChange={(value) =>
+                            updateArrayItem("faqs", index, "question", value)
+                          }
+                        />
+
+                        <RichTextEditor
+                          label="Answer"
+                          value={faq.answerHtml}
+                          onChange={(value) =>
+                            updateArrayItem("faqs", index, "answerHtml", value)
+                          }
+                        />
+
+                        <Button
+                          tone="critical"
+                          onClick={() => removeArrayItem("faqs", index)}
+                        >
+                          Remove FAQ
+                        </Button>
+                      </BlockStack>
+                    </Card>
+                  ))}
+
+                  <Button
+                    onClick={() =>
+                      addArrayItem("faqs", { question: "", answerHtml: "" })
+                    }
+                  >
+                    Add FAQ
+                  </Button>
+                </BlockStack>
+              </Section>
+
+              <div
+                style={{
+                  position: "sticky",
+                  bottom: 18,
+                  zIndex: 20,
+                  border: "1px solid #BFDBFE",
+                  borderRadius: 18,
+                  background: "rgba(255,255,255,.94)",
+                  boxShadow: "0 18px 45px rgba(15,23,42,.12)",
+                  padding: 16,
+                }}
+              >
+                <InlineStack align="space-between" blockAlign="center">
+                  <BlockStack gap="100">
+                    <Text variant="headingMd">Save variant content</Text>
+                    <Text tone="subdued">
+                      Product: {selectedProduct?.title || "No product"} · Variant:{" "}
+                      {selectedVariant?.title || "No variant"}
+                    </Text>
+                  </BlockStack>
+
+                  <Button
+                    variant="primary"
+                    size="large"
+                    loading={fetcher.state === "submitting"}
+                    onClick={saveContent}
+                    disabled={!selectedVariantId}
+                  >
+                    Save Variant Content
                   </Button>
                 </InlineStack>
-              ))}
 
-              <InlineStack gap="300">
-                <Button onClick={addField}>Add Field</Button>
+                {fetcher.data?.success && (
+                  <Box paddingBlockStart="300">
+                    <Text tone="success">Saved successfully ✅</Text>
+                  </Box>
+                )}
 
-                <Button
-                  variant="primary"
-                  loading={fetcher.state === "submitting"}
-                  onClick={saveSpecs}
-                  disabled={!selectedVariantId}
-                >
-                  Save Variant Specs
-                </Button>
-              </InlineStack>
-
-              {fetcher.data?.success && (
-                <Text tone="success">
-                  {fetcher.data?.bulkSaved
-                    ? `Excel data saved successfully ✅ Variants updated: ${fetcher.data.count}`
-                    : "Saved successfully ✅"}
-                </Text>
-              )}
-
-              {fetcher.data?.errors?.length > 0 && (
-                <Text tone="critical">{fetcher.data.errors[0].message}</Text>
-              )}
+                {fetcher.data?.errors?.length > 0 && (
+                  <Box paddingBlockStart="300">
+                    <Text tone="critical">{fetcher.data.errors[0].message}</Text>
+                  </Box>
+                )}
+              </div>
             </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+          </Layout.Section>
+        </Layout>
+      </Page>
+    </div>
   );
 }

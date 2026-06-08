@@ -1,350 +1,799 @@
-<div class="variant-specs-wrapper">
-  <div class="variant-specs-tabs" data-variant-specs-tabs></div>
-  <div class="variant-specs-grid" data-variant-specs-body></div>
+{% comment %}
+  Variant Content Manager - Theme App Block
+{% endcomment %}
+
+<div
+  class="vcm-block"
+  id="vcm-block-{{ block.id }}"
+  data-layout="{{ block.settings.layout }}"
+  data-primary-color="{{ block.settings.primary_color }}"
+>
+  <div class="vcm-empty" hidden>
+    No variant content available.
+  </div>
+
+  <div class="vcm-tabs" hidden></div>
+  <div class="vcm-content"></div>
 </div>
 
 <script>
-  window.variantSpecsData = {
+  window.VCM_DATA_{{ block.id | replace: '-', '_' }} = {
     {% for variant in product.variants %}
       "{{ variant.id }}": {{ variant.metafields.custom.variant_specs_json.value | json }}{% unless forloop.last %},{% endunless %}
     {% endfor %}
   };
+</script>
 
-  const categories = [
-    "ITEM DETAILS",
-    "DIAMOND DETAILS",
-    "SIDE DIAMOND DETAILS (IF APPLICABLE)"
-  ];
+<script>
+(function () {
+  const blockId = "{{ block.id }}";
+  const root = document.getElementById("vcm-block-" + blockId);
+  if (!root) return;
 
-  let activeSpecsTab = "";
+  const rawData = window["VCM_DATA_" + blockId.replaceAll("-", "_")] || {};
+  const layout = root.dataset.layout || "tabs";
+  const primaryColor = root.dataset.primaryColor || "#2563EB";
 
-  function renderVariantSpecs() {
-    const variantInput = document.querySelector('form[action*="/cart/add"] [name="id"]');
-    const variantId = variantInput ? variantInput.value : "{{ product.selected_or_first_available_variant.id }}";
-    const specs = window.variantSpecsData[variantId] || [];
-    const wrapper = document.querySelector("[data-variant-specs-body]");
-    const tabsWrapper = document.querySelector("[data-variant-specs-tabs]");
+  const tabsEl = root.querySelector(".vcm-tabs");
+  const contentEl = root.querySelector(".vcm-content");
+  const emptyEl = root.querySelector(".vcm-empty");
 
-    if (!wrapper || !tabsWrapper) return;
+  function escapeHtml(value) {
+    return String(value || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 
-    wrapper.innerHTML = "";
-    tabsWrapper.innerHTML = "";
+  function textToHtml(value) {
+    return escapeHtml(value).replace(/\n/g, "<br>");
+  }
 
-    const availableCategories = categories.filter(function(category) {
-      return specs.some(function(spec) {
-        const specCategory = spec.category || "DIAMOND DETAILS";
-        return specCategory === category && spec.label && spec.value;
-      });
-    });
+  function parseVariantContent(variantId) {
+    const raw = rawData[String(variantId)];
+    if (!raw) return null;
 
-    if (availableCategories.length === 0) return;
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
 
-    if (!activeSpecsTab || !availableCategories.includes(activeSpecsTab)) {
-      activeSpecsTab = availableCategories[0];
+      if (Array.isArray(parsed)) {
+        return { specs: parsed };
+      }
+
+      return parsed;
+    } catch (error) {
+      return null;
     }
+  }
 
-    availableCategories.forEach(function(category) {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "variant-specs-tab" + (category === activeSpecsTab ? " is-active" : "");
-      tab.textContent = category;
+  function hasText(value) {
+    return String(value || "").trim() !== "";
+  }
 
-      tab.addEventListener("click", function() {
-        activeSpecsTab = category;
-        renderVariantSpecs();
-      });
-
-      tabsWrapper.appendChild(tab);
-    });
-
-    availableCategories.forEach(function(category) {
-      const categorySpecs = specs.filter(function(spec) {
-        const specCategory = spec.category || "DIAMOND DETAILS";
-        return specCategory === category && spec.label && spec.value;
-      });
-
-      let html = `
-        <div class="variant-specs-column ${category === activeSpecsTab ? 'is-active' : ''}">
-          <h3>${category}</h3>
-          <table>
-            <tbody>
-      `;
-
-      categorySpecs.forEach(function(spec) {
-        html += `
-          <tr>
-            <th>${spec.label}</th>
-            <td>${spec.value}</td>
-          </tr>
-        `;
-      });
-
-      html += `
-            </tbody>
-          </table>
-        </div>
-      `;
-
-      wrapper.innerHTML += html;
+  function hasRows(rows) {
+    return Array.isArray(rows) && rows.some(function (row) {
+      return hasText(row.label) || hasText(row.value) || hasText(row.title) || hasText(row.text);
     });
   }
 
-  document.addEventListener("change", function() {
-    setTimeout(renderVariantSpecs, 300);
-  });
+  function getImageUrls(content) {
+    return String(content.imageUrls || "")
+      .split("\n")
+      .map(function (url) { return url.trim(); })
+      .filter(Boolean);
+  }
 
-  document.addEventListener("DOMContentLoaded", renderVariantSpecs);
-  setTimeout(renderVariantSpecs, 500);
+  function buildSections(content) {
+    const sections = [];
+
+    if (hasText(content.description)) {
+      sections.push({
+        id: "description",
+        title: "{{ block.settings.description_title }}",
+        html: `<div class="vcm-rich-text">${textToHtml(content.description)}</div>`
+      });
+    }
+
+    if (hasRows(content.benefits)) {
+      const cards = content.benefits
+        .filter(function (item) {
+          return hasText(item.title) || hasText(item.text) || hasText(item.image);
+        })
+        .map(function (item) {
+          return `
+            <div class="vcm-benefit-card">
+              ${hasText(item.image) ? `<img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.title)}" loading="lazy">` : `<div class="vcm-benefit-icon">${escapeHtml(item.icon || "✨")}</div>`}
+              <div>
+                ${hasText(item.title) ? `<h4>${escapeHtml(item.title)}</h4>` : ""}
+                ${hasText(item.text) ? `<p>${textToHtml(item.text)}</p>` : ""}
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      sections.push({
+        id: "benefits",
+        title: "{{ block.settings.benefits_title }}",
+        html: `<div class="vcm-benefits-grid">${cards}</div>`
+      });
+    }
+
+    if (hasRows(content.specs)) {
+      const grouped = {};
+
+      content.specs.forEach(function (item) {
+        if (!hasText(item.label) && !hasText(item.value)) return;
+
+        const category = item.category || "Details";
+        if (!grouped[category]) grouped[category] = [];
+        grouped[category].push(item);
+      });
+
+      const tables = Object.keys(grouped).map(function (category) {
+        const rows = grouped[category].map(function (item) {
+          return `
+            <tr>
+              <th>${escapeHtml(item.label)}</th>
+              <td>${escapeHtml(item.value)}</td>
+            </tr>
+          `;
+        }).join("");
+
+        return `
+          <div class="vcm-table-wrap">
+            <h4>${escapeHtml(category)}</h4>
+            <table class="vcm-table">${rows}</table>
+          </div>
+        `;
+      }).join("");
+
+      if (tables) {
+        sections.push({
+          id: "specs",
+          title: "{{ block.settings.specs_title }}",
+          html: tables
+        });
+      }
+    }
+
+    if (hasRows(content.materials)) {
+      const rows = content.materials
+        .filter(function (item) {
+          return hasText(item.label) || hasText(item.value);
+        })
+        .map(function (item) {
+          return `
+            <tr>
+              <th>${escapeHtml(item.label)}</th>
+              <td>${escapeHtml(item.value)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      sections.push({
+        id: "materials",
+        title: "{{ block.settings.materials_title }}",
+        html: `<table class="vcm-table">${rows}</table>`
+      });
+    }
+
+    if (hasRows(content.technicalDetails)) {
+      const rows = content.technicalDetails
+        .filter(function (item) {
+          return hasText(item.label) || hasText(item.value);
+        })
+        .map(function (item) {
+          return `
+            <tr>
+              <th>${escapeHtml(item.label)}</th>
+              <td>${escapeHtml(item.value)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      sections.push({
+        id: "technical",
+        title: "{{ block.settings.technical_title }}",
+        html: `<table class="vcm-table">${rows}</table>`
+      });
+    }
+
+    const imageUrls = getImageUrls(content);
+
+    if (imageUrls.length > 0) {
+      const images = imageUrls.map(function (url) {
+        return `<img src="${escapeHtml(url)}" alt="Variant image" loading="lazy">`;
+      }).join("");
+
+      sections.push({
+        id: "gallery",
+        title: "{{ block.settings.gallery_title }}",
+        html: `<div class="vcm-gallery">${images}</div>`
+      });
+    }
+
+    if (hasText(content.videoUrl)) {
+      sections.push({
+        id: "video",
+        title: "{{ block.settings.video_title }}",
+        html: `
+          <div class="vcm-video">
+            <a href="${escapeHtml(content.videoUrl)}" target="_blank" rel="noopener">
+              Watch variant video
+            </a>
+          </div>
+        `
+      });
+    }
+
+    if (hasText(content.pdfUrl)) {
+      sections.push({
+        id: "certificate",
+        title: "{{ block.settings.certificate_title }}",
+        html: `
+          <a class="vcm-pdf-button" href="${escapeHtml(content.pdfUrl)}" target="_blank" rel="noopener">
+            {{ block.settings.pdf_button_text }}
+          </a>
+        `
+      });
+    }
+
+    if (hasText(content.shippingInfo)) {
+      sections.push({
+        id: "shipping",
+        title: "{{ block.settings.shipping_title }}",
+        html: `<div class="vcm-rich-text">${textToHtml(content.shippingInfo)}</div>`
+      });
+    }
+
+    if (hasText(content.careInstructions)) {
+      sections.push({
+        id: "care",
+        title: "{{ block.settings.care_title }}",
+        html: `<div class="vcm-rich-text">${textToHtml(content.careInstructions)}</div>`
+      });
+    }
+
+    return sections;
+  }
+
+  function renderTabs(sections) {
+    tabsEl.hidden = false;
+
+    tabsEl.innerHTML = sections.map(function (section, index) {
+      return `
+        <button class="vcm-tab ${index === 0 ? "is-active" : ""}" data-vcm-tab="${section.id}">
+          ${escapeHtml(section.title)}
+        </button>
+      `;
+    }).join("");
+
+    contentEl.innerHTML = sections.map(function (section, index) {
+      return `
+        <div class="vcm-panel ${index === 0 ? "is-active" : ""}" data-vcm-panel="${section.id}">
+          ${section.html}
+        </div>
+      `;
+    }).join("");
+
+    tabsEl.querySelectorAll(".vcm-tab").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const target = button.dataset.vcmTab;
+
+        tabsEl.querySelectorAll(".vcm-tab").forEach(function (tab) {
+          tab.classList.remove("is-active");
+        });
+
+        contentEl.querySelectorAll(".vcm-panel").forEach(function (panel) {
+          panel.classList.remove("is-active");
+        });
+
+        button.classList.add("is-active");
+        contentEl.querySelector(`[data-vcm-panel="${target}"]`)?.classList.add("is-active");
+      });
+    });
+  }
+
+  function renderAccordion(sections) {
+    tabsEl.hidden = true;
+
+    contentEl.innerHTML = sections.map(function (section, index) {
+      return `
+        <div class="vcm-accordion-item">
+          <button class="vcm-accordion-title ${index === 0 ? "is-active" : ""}" data-vcm-acc="${section.id}">
+            <span>${escapeHtml(section.title)}</span>
+            <span>+</span>
+          </button>
+          <div class="vcm-accordion-panel ${index === 0 ? "is-active" : ""}" data-vcm-acc-panel="${section.id}">
+            ${section.html}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    contentEl.querySelectorAll(".vcm-accordion-title").forEach(function (button) {
+      button.addEventListener("click", function () {
+        const target = button.dataset.vcmAcc;
+        button.classList.toggle("is-active");
+        contentEl.querySelector(`[data-vcm-acc-panel="${target}"]`)?.classList.toggle("is-active");
+      });
+    });
+  }
+
+  function renderCards(sections) {
+    tabsEl.hidden = true;
+
+    contentEl.innerHTML = `
+      <div class="vcm-card-layout">
+        ${sections.map(function (section) {
+          return `
+            <div class="vcm-card-section">
+              <h3>${escapeHtml(section.title)}</h3>
+              ${section.html}
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderForVariant(variantId) {
+    const content = parseVariantContent(variantId);
+    const sections = content ? buildSections(content) : [];
+
+    tabsEl.innerHTML = "";
+    contentEl.innerHTML = "";
+
+    if (!sections.length) {
+      emptyEl.hidden = false;
+      tabsEl.hidden = true;
+      return;
+    }
+
+    emptyEl.hidden = true;
+
+    if (layout === "accordion") {
+      renderAccordion(sections);
+    } else if (layout === "cards") {
+      renderCards(sections);
+    } else {
+      renderTabs(sections);
+    }
+  }
+
+  function getCurrentVariantId() {
+    const formInput = document.querySelector('form[action*="/cart/add"] [name="id"]');
+    return formInput ? formInput.value : "{{ product.selected_or_first_available_variant.id }}";
+  }
+
+  function init() {
+    renderForVariant(getCurrentVariantId());
+
+    document.addEventListener("variant:change", function (event) {
+      const variantId = event?.detail?.variant?.id;
+      if (variantId) renderForVariant(variantId);
+    });
+
+    document.addEventListener("change", function (event) {
+      if (event.target && event.target.name === "id") {
+        renderForVariant(event.target.value);
+      }
+    });
+
+    const variantInput = document.querySelector('form[action*="/cart/add"] [name="id"]');
+    if (variantInput) {
+      const observer = new MutationObserver(function () {
+        renderForVariant(variantInput.value);
+      });
+
+      observer.observe(variantInput, {
+        attributes: true,
+        attributeFilter: ["value"]
+      });
+    }
+  }
+
+  init();
+})();
 </script>
 
 <style>
-  .variant-specs-wrapper {
-    width: 100%;
-    margin-top: {{ block.settings.section_margin_top }}px;
-    margin-bottom: {{ block.settings.section_margin_bottom }}px;
+  #vcm-block-{{ block.id }} {
+    --vcm-primary: {{ block.settings.primary_color }};
+    --vcm-text: {{ block.settings.text_color }};
+    --vcm-bg: {{ block.settings.background_color }};
+    --vcm-border: {{ block.settings.border_color }};
+    --vcm-radius: {{ block.settings.border_radius }}px;
+    margin-top: {{ block.settings.margin_top }}px;
+    margin-bottom: {{ block.settings.margin_bottom }}px;
+    color: var(--vcm-text);
   }
 
-  .variant-specs-tabs {
-    display: none;
+  #vcm-block-{{ block.id }} .vcm-tabs {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--vcm-border);
   }
 
-  .variant-specs-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: {{ block.settings.column_gap }}px;
-  }
-
-  .variant-specs-column h3 {
-    margin: 0 0 18px;
-    font-size: {{ block.settings.heading_size }}px;
-    letter-spacing: {{ block.settings.heading_letter_spacing }}px;
-    text-transform: uppercase;
-    color: {{ block.settings.heading_color }};
-  }
-
-  .variant-specs-column table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  {% if block.settings.border_style == 'bottom' %}
-    .variant-specs-column tr {
-      border-bottom: 1px solid {{ block.settings.border_color }};
-    }
-  {% elsif block.settings.border_style == 'top_bottom' %}
-    .variant-specs-column tr {
-      border-top: 1px solid {{ block.settings.border_color }};
-      border-bottom: 1px solid {{ block.settings.border_color }};
-    }
-  {% elsif block.settings.border_style == 'full' %}
-    .variant-specs-column th,
-    .variant-specs-column td {
-      border: 1px solid {{ block.settings.border_color }};
-      padding-left: 12px;
-      padding-right: 12px;
-    }
-  {% endif %}
-
-  .variant-specs-column th,
-  .variant-specs-column td {
-    padding-top: {{ block.settings.row_padding }}px;
-    padding-bottom: {{ block.settings.row_padding }}px;
-    text-align: left;
-    font-size: {{ block.settings.text_size }}px;
-    color: {{ block.settings.text_color }};
-    vertical-align: top;
-  }
-
-  .variant-specs-column th {
-    width: {{ block.settings.label_width }}%;
+  #vcm-block-{{ block.id }} .vcm-tab {
+    border: 0;
+    background: transparent;
+    color: var(--vcm-text);
+    padding: 12px 14px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
     font-weight: 600;
   }
 
-  .variant-specs-column td {
-    opacity: 0.75;
+  #vcm-block-{{ block.id }} .vcm-tab.is-active {
+    color: var(--vcm-primary);
+    border-color: var(--vcm-primary);
   }
 
-  @media screen and (max-width: 989px) {
-    .variant-specs-tabs {
-      display: flex;
-      gap: 10px;
-      overflow-x: auto;
-      margin-bottom: 22px;
-      padding-bottom: 4px;
-      scrollbar-width: none;
-    }
+  #vcm-block-{{ block.id }} .vcm-panel {
+    display: none;
+    background: var(--vcm-bg);
+    border: 1px solid var(--vcm-border);
+    border-radius: var(--vcm-radius);
+    padding: 22px;
+  }
 
-    .variant-specs-tabs::-webkit-scrollbar {
-      display: none;
-    }
+  #vcm-block-{{ block.id }} .vcm-panel.is-active {
+    display: block;
+  }
 
-    .variant-specs-tab {
-      flex: 0 0 auto;
-      padding: 10px 16px;
-      border: 1px solid {{ block.settings.border_color }};
-      background: transparent;
-      color: {{ block.settings.text_color }};
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
+  #vcm-block-{{ block.id }} .vcm-rich-text {
+    line-height: 1.7;
+    font-size: 15px;
+  }
 
-    .variant-specs-tab.is-active {
-      background: {{ block.settings.text_color }};
-      color: #ffffff;
-      border-color: {{ block.settings.text_color }};
-    }
+  #vcm-block-{{ block.id }} .vcm-benefits-grid {
+    display: grid;
+    grid-template-columns: repeat({{ block.settings.benefit_columns }}, minmax(0, 1fr));
+    gap: 14px;
+  }
 
-    .variant-specs-grid {
-      display: block;
-    }
+  #vcm-block-{{ block.id }} .vcm-benefit-card {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--vcm-border);
+    border-radius: var(--vcm-radius);
+    background: #fff;
+  }
 
-    .variant-specs-column {
-      display: none;
-    }
+  #vcm-block-{{ block.id }} .vcm-benefit-card img {
+    width: 54px;
+    height: 54px;
+    object-fit: cover;
+    border-radius: 12px;
+  }
 
-    .variant-specs-column.is-active {
-      display: block;
-    }
+  #vcm-block-{{ block.id }} .vcm-benefit-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: #eff6ff;
+    font-size: 22px;
+    flex: 0 0 auto;
+  }
 
-    .variant-specs-column h3 {
-      display: none;
-    }
+  #vcm-block-{{ block.id }} .vcm-benefit-card h4 {
+    margin: 0 0 6px;
+    font-size: 16px;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-benefit-card p {
+    margin: 0;
+    opacity: .75;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-table-wrap + .vcm-table-wrap {
+    margin-top: 22px;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-table-wrap h4 {
+    margin: 0 0 10px;
+    color: var(--vcm-primary);
+  }
+
+  #vcm-block-{{ block.id }} .vcm-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--vcm-border);
+    border-radius: var(--vcm-radius);
+    overflow: hidden;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-table th,
+  #vcm-block-{{ block.id }} .vcm-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--vcm-border);
+    text-align: left;
+    font-size: 14px;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-table th {
+    background: #f8fafc;
+    font-weight: 700;
+    width: 38%;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-gallery {
+    display: grid;
+    grid-template-columns: repeat({{ block.settings.gallery_columns }}, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-gallery img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: var(--vcm-radius);
+    border: 1px solid var(--vcm-border);
+  }
+
+  #vcm-block-{{ block.id }} .vcm-video a,
+  #vcm-block-{{ block.id }} .vcm-pdf-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--vcm-primary);
+    color: #fff;
+    text-decoration: none;
+    padding: 12px 18px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-accordion-item {
+    border: 1px solid var(--vcm-border);
+    border-radius: var(--vcm-radius);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-accordion-title {
+    width: 100%;
+    border: 0;
+    background: #f8fafc;
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-accordion-title.is-active {
+    color: var(--vcm-primary);
+  }
+
+  #vcm-block-{{ block.id }} .vcm-accordion-panel {
+    display: none;
+    padding: 18px;
+    background: var(--vcm-bg);
+  }
+
+  #vcm-block-{{ block.id }} .vcm-accordion-panel.is-active {
+    display: block;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-card-layout {
+    display: grid;
+    gap: 18px;
+  }
+
+  #vcm-block-{{ block.id }} .vcm-card-section {
+    border: 1px solid var(--vcm-border);
+    border-radius: var(--vcm-radius);
+    padding: 20px;
+    background: var(--vcm-bg);
+  }
+
+  #vcm-block-{{ block.id }} .vcm-card-section h3 {
+    margin: 0 0 14px;
+    color: var(--vcm-primary);
+  }
+
+  #vcm-block-{{ block.id }} .vcm-empty {
+    padding: 18px;
+    border: 1px dashed var(--vcm-border);
+    border-radius: var(--vcm-radius);
+    color: #64748b;
   }
 
   @media screen and (max-width: 749px) {
-    .variant-specs-tab {
-      font-size: 11px;
-      padding: 9px 13px;
+    #vcm-block-{{ block.id }} .vcm-tabs {
+      display: none;
     }
 
-    .variant-specs-column th,
-    .variant-specs-column td {
-      font-size: 12px;
+    #vcm-block-{{ block.id }} .vcm-panel {
+      display: block;
+      margin-bottom: 14px;
+      padding: 16px;
+    }
+
+    #vcm-block-{{ block.id }} .vcm-benefits-grid,
+    #vcm-block-{{ block.id }} .vcm-gallery {
+      grid-template-columns: 1fr;
+    }
+
+    #vcm-block-{{ block.id }} .vcm-table th,
+    #vcm-block-{{ block.id }} .vcm-table td {
+      display: block;
+      width: 100%;
     }
   }
 </style>
 
 {% schema %}
 {
-  "name": "Variant Specs Table",
+  "name": "Variant Content Manager",
   "target": "section",
   "settings": [
     {
+      "type": "select",
+      "id": "layout",
+      "label": "Desktop layout",
+      "default": "tabs",
+      "options": [
+        {
+          "label": "Modern tabs",
+          "value": "tabs"
+        },
+        {
+          "label": "Accordion",
+          "value": "accordion"
+        },
+        {
+          "label": "Cards",
+          "value": "cards"
+        }
+      ]
+    },
+    {
       "type": "color",
-      "id": "heading_color",
-      "label": "Heading color",
-      "default": "#000000"
+      "id": "primary_color",
+      "label": "Primary color",
+      "default": "#2563EB"
     },
     {
       "type": "color",
       "id": "text_color",
       "label": "Text color",
-      "default": "#222222"
+      "default": "#0F172A"
+    },
+    {
+      "type": "color",
+      "id": "background_color",
+      "label": "Content background",
+      "default": "#FFFFFF"
     },
     {
       "type": "color",
       "id": "border_color",
       "label": "Border color",
-      "default": "#e5e5e5"
-    },
-    {
-      "type": "select",
-      "id": "border_style",
-      "label": "Border style",
-      "default": "bottom",
-      "options": [
-        {
-          "value": "none",
-          "label": "No border"
-        },
-        {
-          "value": "bottom",
-          "label": "Bottom border only"
-        },
-        {
-          "value": "top_bottom",
-          "label": "Top and bottom border"
-        },
-        {
-          "value": "full",
-          "label": "Full table border"
-        }
-      ]
+      "default": "#DBEAFE"
     },
     {
       "type": "range",
-      "id": "heading_size",
-      "label": "Heading font size",
-      "min": 8,
-      "max": 24,
-      "step": 1,
-      "default": 12
-    },
-    {
-      "type": "range",
-      "id": "text_size",
-      "label": "Text font size",
-      "min": 10,
-      "max": 22,
-      "step": 1,
-      "default": 13
-    },
-    {
-      "type": "range",
-      "id": "heading_letter_spacing",
-      "label": "Heading letter spacing",
+      "id": "border_radius",
+      "label": "Border radius",
       "min": 0,
-      "max": 5,
-      "step": 0.5,
-      "default": 1.5
-    },
-    {
-      "type": "range",
-      "id": "row_padding",
-      "label": "Row padding",
-      "min": 4,
       "max": 30,
-      "step": 1,
-      "default": 13
-    },
-    {
-      "type": "range",
-      "id": "column_gap",
-      "label": "Column gap",
-      "min": 10,
-      "max": 80,
       "step": 2,
-      "default": 42
+      "default": 16
     },
     {
       "type": "range",
-      "id": "label_width",
-      "label": "Label column width",
-      "min": 30,
-      "max": 70,
+      "id": "benefit_columns",
+      "label": "Benefit columns desktop",
+      "min": 1,
+      "max": 4,
       "step": 1,
-      "default": 45
+      "default": 2
     },
     {
       "type": "range",
-      "id": "section_margin_top",
+      "id": "gallery_columns",
+      "label": "Gallery columns desktop",
+      "min": 1,
+      "max": 5,
+      "step": 1,
+      "default": 3
+    },
+    {
+      "type": "text",
+      "id": "description_title",
+      "label": "Description tab title",
+      "default": "Description"
+    },
+    {
+      "type": "text",
+      "id": "benefits_title",
+      "label": "Benefits tab title",
+      "default": "Benefits"
+    },
+    {
+      "type": "text",
+      "id": "specs_title",
+      "label": "Specs tab title",
+      "default": "Details"
+    },
+    {
+      "type": "text",
+      "id": "materials_title",
+      "label": "Materials tab title",
+      "default": "Materials"
+    },
+    {
+      "type": "text",
+      "id": "technical_title",
+      "label": "Technical details tab title",
+      "default": "Technical Details"
+    },
+    {
+      "type": "text",
+      "id": "gallery_title",
+      "label": "Gallery tab title",
+      "default": "Gallery"
+    },
+    {
+      "type": "text",
+      "id": "video_title",
+      "label": "Video tab title",
+      "default": "Video"
+    },
+    {
+      "type": "text",
+      "id": "certificate_title",
+      "label": "Certificate tab title",
+      "default": "Certificate"
+    },
+    {
+      "type": "text",
+      "id": "pdf_button_text",
+      "label": "PDF button text",
+      "default": "Download Certificate"
+    },
+    {
+      "type": "text",
+      "id": "shipping_title",
+      "label": "Shipping tab title",
+      "default": "Shipping"
+    },
+    {
+      "type": "text",
+      "id": "care_title",
+      "label": "Care tab title",
+      "default": "Care Instructions"
+    },
+    {
+      "type": "range",
+      "id": "margin_top",
       "label": "Top spacing",
       "min": 0,
       "max": 100,
       "step": 4,
-      "default": 40
+      "default": 24
     },
     {
       "type": "range",
-      "id": "section_margin_bottom",
+      "id": "margin_bottom",
       "label": "Bottom spacing",
       "min": 0,
       "max": 100,
       "step": 4,
-      "default": 40
+      "default": 24
     }
   ]
 }

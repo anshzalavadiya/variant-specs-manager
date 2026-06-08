@@ -1,0 +1,366 @@
+<div id="vcm-bottom-{{ block.id }}" class="vcm-wrap"></div>
+
+<script>
+window.VCM_BOTTOM_{{ block.id | replace: '-', '_' }} = {
+  {% for variant in product.variants %}
+    "{{ variant.id }}": {{ variant.metafields.custom.variant_specs_json.value | json }}{% unless forloop.last %},{% endunless %}
+  {% endfor %}
+};
+</script>
+
+<script>
+(function(){
+  const root = document.getElementById("vcm-bottom-{{ block.id }}");
+  const data = window.VCM_BOTTOM_{{ block.id | replace: '-', '_' }} || {};
+  const targetPosition = "bottom";
+
+  function parse(raw){
+    if(!raw) return null;
+    try {
+      let first = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if(typeof first === "string") first = JSON.parse(first);
+      return first;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function has(v){
+    return String(v || "").trim() !== "";
+  }
+
+  function display(content, key){
+    return content?.display?.[key] || { position: "bottom", style: "accordion" };
+  }
+
+  function shouldShow(content, key){
+    return display(content, key).position === targetPosition;
+  }
+
+  function table(rows){
+    if(!Array.isArray(rows)) return "";
+    const clean = rows.filter(r => has(r.label) || has(r.value));
+    if(!clean.length) return "";
+
+    const grouped = {};
+    clean.forEach(r => {
+      const cat = r.category || "DETAILS";
+      if(!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(r);
+    });
+
+    return Object.keys(grouped).map(cat => `
+      <div class="vcm-table-group">
+        <h4>${cat}</h4>
+        <table class="vcm-table">
+          ${grouped[cat].map(r => `<tr><th>${r.label || ""}</th><td>${r.value || ""}</td></tr>`).join("")}
+        </table>
+      </div>
+    `).join("");
+  }
+
+  function renderSection(key, title, html, style){
+    if(!html) return "";
+
+    if(style === "open"){
+      return `<div class="vcm-open"><h3>${title}</h3><div>${html}</div></div>`;
+    }
+
+    if(style === "card"){
+      return `<div class="vcm-card"><h3>${title}</h3><div>${html}</div></div>`;
+    }
+
+    if(style === "tab"){
+      return `<div class="vcm-tab-source" data-title="${title}">${html}</div>`;
+    }
+
+    return `
+      <div class="vcm-section">
+        <button class="vcm-title" type="button"><span>${title}</span><span>+</span></button>
+        <div class="vcm-panel">${html}</div>
+      </div>
+    `;
+  }
+
+  function build(content){
+    let normalHtml = "";
+    let tabItems = [];
+
+    function add(key, title, html){
+      const style = display(content, key).style || "accordion";
+      const sectionHtml = renderSection(key, title, html, style);
+
+      if(style === "tab" && html){
+        tabItems.push({ title, html });
+      } else {
+        normalHtml += sectionHtml;
+      }
+    }
+
+    if(shouldShow(content, "description") && has(content.descriptionHtml)){
+      add("description", "Description", content.descriptionHtml);
+    }
+
+    if(shouldShow(content, "benefits") && Array.isArray(content.benefits)){
+      const benefits = content.benefits.filter(b => has(b.title) || has(b.text) || has(b.image)).map(b => `
+        <div class="vcm-benefit">
+          ${has(b.image) ? `<img src="${b.image}" loading="lazy">` : `<div class="vcm-icon">${b.icon || "✨"}</div>`}
+          <div><strong>${b.title || ""}</strong><p>${b.text || ""}</p></div>
+        </div>
+      `).join("");
+      if(benefits) add("benefits", "Benefits", `<div class="vcm-benefits">${benefits}</div>`);
+    }
+
+    if(shouldShow(content, "specs")){
+      add("specs", "Details", table(content.specs));
+    }
+
+    if(shouldShow(content, "materials")){
+      add("materials", "Materials", table(content.materials));
+    }
+
+    if(shouldShow(content, "technicalDetails")){
+      add("technicalDetails", "Technical Details", table(content.technicalDetails));
+    }
+
+    if(shouldShow(content, "gallery") && Array.isArray(content.gallery) && content.gallery.length){
+      add("gallery", "Gallery", `<div class="vcm-gallery">${content.gallery.map(img => `<img src="${img}" loading="lazy">`).join("")}</div>`);
+    }
+
+    if(shouldShow(content, "video") && has(content.videoUrl)){
+      add("video", "Video", `<a class="vcm-btn" href="${content.videoUrl}" target="_blank">Watch Video</a>`);
+    }
+
+    if(shouldShow(content, "certificate") && has(content.pdfUrl)){
+      add("certificate", "Certificate", `<a class="vcm-btn" href="${content.pdfUrl}" target="_blank">Download Certificate</a>`);
+    }
+
+    if(shouldShow(content, "shipping") && has(content.shippingInfoHtml)){
+      add("shipping", "Shipping", content.shippingInfoHtml);
+    }
+
+    if(shouldShow(content, "care") && has(content.careInstructionsHtml)){
+      add("care", "Care Instructions", content.careInstructionsHtml);
+    }
+
+    if(shouldShow(content, "faqs") && Array.isArray(content.faqs)){
+      const faqs = content.faqs.filter(f => has(f.question) || has(f.answerHtml)).map(f => `
+        <div class="vcm-faq"><strong>${f.question || ""}</strong><div>${f.answerHtml || ""}</div></div>
+      `).join("");
+      if(faqs) add("faqs", "FAQ", faqs);
+    }
+
+    if(tabItems.length){
+      normalHtml += `
+        <div class="vcm-tabs">
+          <div class="vcm-tab-buttons">
+            ${tabItems.map((t, i) => `<button class="${i === 0 ? "active" : ""}" data-tab="${i}">${t.title}</button>`).join("")}
+          </div>
+          ${tabItems.map((t, i) => `<div class="vcm-tab-panel ${i === 0 ? "active" : ""}" data-panel="${i}">${t.html}</div>`).join("")}
+        </div>
+      `;
+    }
+
+    return normalHtml;
+  }
+
+  function render(){
+    const input = document.querySelector('form[action*="/cart/add"] [name="id"]');
+    const variantId = input ? input.value : "{{ product.selected_or_first_available_variant.id }}";
+    const content = parse(data[String(variantId)]);
+
+    if(!content){
+      root.innerHTML = "";
+      return;
+    }
+
+    root.innerHTML = build(content);
+
+    root.querySelectorAll(".vcm-title").forEach(btn => {
+      btn.addEventListener("click", () => btn.parentElement.classList.toggle("open"));
+    });
+
+    root.querySelectorAll(".vcm-tab-buttons button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.tab;
+        root.querySelectorAll(".vcm-tab-buttons button").forEach(b => b.classList.remove("active"));
+        root.querySelectorAll(".vcm-tab-panel").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        root.querySelector(`[data-panel="${id}"]`)?.classList.add("active");
+      });
+    });
+
+    const first = root.querySelector(".vcm-section");
+    if(first) first.classList.add("open");
+  }
+
+  document.addEventListener("change", e => {
+    if(e.target && e.target.name === "id") render();
+  });
+
+  document.addEventListener("variant:change", render);
+
+  setInterval(render, 800);
+  render();
+})();
+</script>
+
+<style>
+#vcm-bottom-{{ block.id }} {
+  margin: {{ block.settings.margin_top }}px 0 {{ block.settings.margin_bottom }}px;
+  color: {{ block.settings.text_color }};
+}
+
+#vcm-bottom-{{ block.id }} .vcm-section,
+#vcm-bottom-{{ block.id }} .vcm-open,
+#vcm-bottom-{{ block.id }} .vcm-card,
+#vcm-bottom-{{ block.id }} .vcm-tabs {
+  border: 1px solid {{ block.settings.border_color }};
+  border-radius: {{ block.settings.border_radius }}px;
+  margin-bottom: 14px;
+  background: {{ block.settings.background_color }};
+  overflow: hidden;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-card {
+  padding: 20px;
+  box-shadow: 0 12px 28px rgba(15,23,42,.08);
+}
+
+#vcm-bottom-{{ block.id }} .vcm-open {
+  padding: 20px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-title {
+  width: 100%;
+  padding: 16px;
+  background: #f8fafc;
+  border: 0;
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-panel {
+  display: none;
+  padding: 18px;
+}
+
+#vcm-bottom-{{ block.id }} .open .vcm-panel {
+  display: block;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 18px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-table-group h4 {
+  color: {{ block.settings.primary_color }};
+  margin: 0 0 10px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-table th,
+#vcm-bottom-{{ block.id }} .vcm-table td {
+  border-bottom: 1px solid {{ block.settings.border_color }};
+  padding: 12px;
+  text-align: left;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-benefits {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 14px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-benefit {
+  display: flex;
+  gap: 12px;
+  border: 1px solid {{ block.settings.border_color }};
+  border-radius: 14px;
+  padding: 14px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-benefit img {
+  width: 58px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-gallery {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 14px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-gallery img {
+  width: 100%;
+  border-radius: 12px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-btn {
+  display: inline-flex;
+  background: {{ block.settings.primary_color }};
+  color: white;
+  padding: 12px 18px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-tab-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid {{ block.settings.border_color }};
+  padding: 10px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-tab-buttons button {
+  border: 0;
+  background: transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-tab-buttons button.active {
+  color: {{ block.settings.primary_color }};
+  border-bottom: 3px solid {{ block.settings.primary_color }};
+}
+
+#vcm-bottom-{{ block.id }} .vcm-tab-panel {
+  display: none;
+  padding: 18px;
+}
+
+#vcm-bottom-{{ block.id }} .vcm-tab-panel.active {
+  display: block;
+}
+
+@media(max-width: 749px){
+  #vcm-bottom-{{ block.id }} .vcm-benefits,
+  #vcm-bottom-{{ block.id }} .vcm-gallery {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+{% schema %}
+{
+  "name": "Variant Content Bottom",
+  "target": "section",
+  "settings": [
+    { "type": "color", "id": "primary_color", "label": "Primary color", "default": "#2563EB" },
+    { "type": "color", "id": "text_color", "label": "Text color", "default": "#0F172A" },
+    { "type": "color", "id": "background_color", "label": "Background color", "default": "#FFFFFF" },
+    { "type": "color", "id": "border_color", "label": "Border color", "default": "#DBEAFE" },
+    { "type": "range", "id": "border_radius", "label": "Border radius", "min": 0, "max": 30, "step": 2, "default": 16 },
+    { "type": "range", "id": "margin_top", "label": "Top spacing", "min": 0, "max": 100, "step": 4, "default": 24 },
+    { "type": "range", "id": "margin_bottom", "label": "Bottom spacing", "min": 0, "max": 100, "step": 4, "default": 24 }
+  ]
+}
+{% endschema %}
